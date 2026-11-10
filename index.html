@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Column Combiner</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1c1c1a;--mut:#6b6b66;--line:#d6d6cf;--card:#fff;--acc:#2f6f4f;--scr:#efe9d6}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecece6;--mut:#9a9a92;--line:#3a3a36;--card:#1f1f1c;--acc:#6fbf94;--scr:#2e2a1c}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font-size:17px;margin:0 12px 0 0}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+main{padding:14px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.bar input[type=text]{border:1px solid var(--line);background:var(--card);border-radius:6px;padding:5px 8px}
+.grid{overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse}
+th,td{border:1px solid var(--line);padding:0}
+th{background:var(--bg);font-weight:600;padding:4px 6px;position:sticky;top:0;z-index:1;font-size:13px}
+th.scr,td.scr{background:var(--scr)}
+th label{font-weight:400;color:var(--mut);font-size:11px;display:block;cursor:pointer}
+td.rn{background:var(--bg);color:var(--mut);text-align:center;padding:0 6px;font-size:12px}
+.help{color:var(--mut);font-size:13px;margin:10px 0}
+.mods{margin-top:12px;display:grid;gap:6px}
+.mod{display:flex;gap:8px;align-items:center;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+.mod span{flex:1}
+#stage{min-height:55vh;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;text-align:center;user-select:none;border:1px dashed var(--line);border-radius:12px;padding:20px}
+#out{font-size:clamp(28px,7vw,72px);font-weight:600;word-break:break-word}
+#stage small{color:var(--mut);margin-top:18px}
+.hide{display:none}
+.grid{scroll-padding:56px 0 0 46px}
+#wrap{position:relative;display:inline-block;min-width:100%}
+#tbl{user-select:none;cursor:cell}
+#tbl td[data-r]{height:30px;min-width:150px;max-width:150px;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tbl td input{width:100%;height:28px;border:0;background:var(--card);padding:0;outline:none;user-select:text;cursor:text}
+td.rn{cursor:pointer}th{cursor:grab}
+td.sel,td.on,th.on{background:color-mix(in srgb,var(--acc) 18%,transparent)}
+td.act{outline:2px solid var(--acc);outline-offset:-2px}
+td.fl{outline:1px dashed var(--acc);outline-offset:-1px;background:color-mix(in srgb,var(--acc) 8%,transparent)}
+th.dov{outline:2px dashed var(--acc);outline-offset:-2px}
+#fh{position:absolute;width:9px;height:9px;background:var(--acc);border:1px solid var(--card);cursor:crosshair;display:none;z-index:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Column Combiner</h1>
+  <button id="tEdit" class="on">Edit</button>
+  <button id="tPrac">Practice</button>
+</header>
+<main>
+<section id="edit">
+  <div class="bar">
+    <button id="undo" title="Ctrl+Z">↶ Undo</button><button id="redo" title="Ctrl+Shift+Z / Ctrl+Y">↷ Redo</button><button id="addRow">+ Row</button><button id="add5">+ 5 Rows</button><button id="delRow">− Row</button>
+    <button id="addCol">+ Column</button><button id="delCol">− Column</button>
+    <button id="fill" title="Ctrl+D fills one cell from above">Fill ↓ to end</button>
+    <label>Separator <input type="text" id="sep" size="3"></label>
+    <label><input type="checkbox" id="link"> Same row across columns</label>
+    <button id="clear">Clear all</button>
+  </div>
+  <div class="grid"><div id="wrap"><table id="tbl"></table><div id="fh"></div></div></div>
+  <p class="help">Click and drag to select; arrows (Ctrl+arrow jumps), Tab and Enter move; type, double-click or F2 to edit; Delete clears; Ctrl+C / X / V work, including pasting from Excel, Sheets or CSV. Drag the small square at a selection's corner to fill; double-click it to fill down as far as the column to the left has data. Drag a column header onto another to swap columns. Ctrl+D fills down. Formulas start with <b>=</b> (e.g. <code>=B1&amp;"s"</code>, <code>=UPPER(A2)</code>, <code>=IF(A1="yo","o",C1)</code>, <code>=JOIN(", ",A1:A5)</code>); functions: CONCAT, JOIN, UPPER, LOWER, PROPER, TRIM, LEFT, RIGHT, MID, LEN, SUBSTITUTE, REPT, IF, IFERROR, SUM. Tick <b>scratch</b> on a column to use it for building without showing it in practice.</p>
+  <div class="bar">
+    <input type="text" id="mname" placeholder="Module name" size="22">
+    <button id="save">Save module</button>
+    <button id="dlCur">Download current JSON</button>
+    <button id="dlAll">Download all JSON</button>
+    <label><button onclick="document.getElementById('imp').click()">Import JSON</button><input type="file" id="imp" accept=".json" class="hide"></label>
+  </div>
+  <div class="mods" id="mods"></div>
+</section>
+<section id="prac" class="hide">
+  <div id="stage"><div id="out">Press space or click</div><small>Space or click for a new combination</small></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const CK='cc_current',MK='cc_modules';
+let S=load(CK)||fresh();
+let cache=new Map(),last=[0,0];
+
+function fresh(){return{cols:Array.from({length:5},()=>({scratch:false})),cells:Array.from({length:10},()=>Array(5).fill('')),sep:' ',link:false,name:''}}
+function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
+function store(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function persist(){store(CK,S)}
+function mods(){return load(MK)||{}}
+
+const cn=i=>{let s='';i++;while(i>0){s=String.fromCharCode(65+(i-1)%26)+s;i=Math.floor((i-1)/26)}return s};
+const ci=s=>s.toUpperCase().split('').reduce((a,c)=>a*26+c.charCodeAt(0)-64,0)-1;
+const raw=(r,c)=>(S.cells[r]&&S.cells[r][c])||'';
+function ensure(r,c){
+  while(S.cols.length<=c){S.cols.push({scratch:false});S.cells.forEach(x=>x.push(''))}
+  while(S.cells.length<=r)S.cells.push(Array(S.cols.length).fill(''));
+}
+
+/* ---------- formula engine ---------- */
+function val(r,c,stack=new Set()){
+  const k=r+','+c;
+  if(cache.has(k))return cache.get(k);
+  const t=raw(r,c);
+  if(t[0]!=='=')return t;
+  if(stack.has(k))throw Error('#CYCLE');
+  stack.add(k);
+  let v;
+  try{v=compile(t.slice(1),stack)()}finally{stack.delete(k)}
+  if(Array.isArray(v))v=v[0]??'';
+  cache.set(k,v);return v;
+}
+const flat=a=>a.flat(Infinity);
+const str=x=>Array.isArray(x)?str(x[0]??''):String(x??'');
+const num=x=>{if(Array.isArray(x))x=x[0]??'';if(x==='')return 0;const n=Number(x);if(isNaN(n))throw Error('#VALUE');return n};
+const isN=x=>x!==''&&!isNaN(Number(x));
+function cmp(a,b,op){
+  a=str(a);b=str(b);
+  let x=a,y=b;
+  if(isN(a)&&isN(b)){x=+a;y=+b}else{x=a.toLowerCase();y=b.toLowerCase()}
+  return{'=':x===y,'<>':x!==y,'<':x<y,'>':x>y,'<=':x<=y,'>=':x>=y}[op]?'TRUE':'FALSE';
+}
+const FN={
+  CONCAT:(...a)=>flat(a).join(''),CONCATENATE:(...a)=>flat(a).join(''),
+  JOIN:(s,...a)=>flat(a).filter(x=>x!=='').join(str(s)),
+  UPPER:s=>str(s).toUpperCase(),LOWER:s=>str(s).toLowerCase(),
+  PROPER:s=>str(s).toLowerCase().replace(/(^|[\s\-'])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase()),
+  TRIM:s=>str(s).trim().replace(/\s+/g,' '),
+  LEFT:(s,n=1)=>str(s).slice(0,num(n)),RIGHT:(s,n=1)=>num(n)?str(s).slice(-num(n)):'',
+  MID:(s,a,n)=>str(s).substr(num(a)-1,num(n)),LEN:s=>str(s).length,
+  SUBSTITUTE:(s,a,b)=>str(s).split(str(a)).join(str(b)),REPT:(s,n)=>str(s).repeat(num(n)),
+  SUM:(...a)=>flat(a).reduce((t,x)=>t+(isN(x)?+x:0),0)
+};
+function compile(src,stack){
+  const re=/\s*(?:("(?:[^"]|"")*")|(\d+\.?\d*)|([A-Za-z]{1,3}\d+)(?::([A-Za-z]{1,3}\d+))?|([A-Za-z_]+)(?=\()|(<>|<=|>=|[-+*\/&=<>(),]))/y;
+  const tk=[];let m;
+  while(re.lastIndex<src.length){
+    const at=re.lastIndex;
+    if(!src.slice(at).trim())break;
+    m=re.exec(src);
+    if(!m)throw Error('#ERR');
+    if(m[1]!==undefined)tk.push({t:'s',v:m[1].slice(1,-1).replace(/""/g,'"')});
+    else if(m[2]!==undefined)tk.push({t:'n',v:m[2]});
+    else if(m[3]!==undefined)tk.push({t:'r',a:m[3],b:m[4]});
+    else if(m[5]!==undefined)tk.push({t:'f',v:m[5].toUpperCase()});
+    else tk.push({t:'o',v:m[6]});
+  }
+  let p=0;
+  const pk=()=>tk[p],isO=v=>pk()&&pk().t==='o'&&pk().v===v;
+  const ex=v=>{if(!isO(v))throw Error('#ERR');p++};
+  const pos=a=>{const x=/([A-Za-z]+)(\d+)/.exec(a);return[+x[2]-1,ci(x[1])]};
+  function pCmp(){let l=pCat();while(pk()&&pk().t==='o'&&['=','<>','<','>','<=','>='].includes(pk().v)){const op=tk[p++].v,L=l,R=pCat();l=()=>cmp(L(),R(),op)}return l}
+  function pCat(){let l=pAdd();while(isO('&')){p++;const L=l,R=pAdd();l=()=>str(L())+str(R())}return l}
+  function pAdd(){let l=pMul();while(isO('+')||isO('-')){const op=tk[p++].v,L=l,R=pMul();l=()=>op==='+'?num(L())+num(R()):num(L())-num(R())}return l}
+  function pMul(){let l=pUn();while(isO('*')||isO('/')){const op=tk[p++].v,L=l,R=pUn();l=()=>{const a=num(L()),b=num(R());if(op==='/'&&b===0)throw Error('#DIV/0');return op==='*'?a*b:a/b}}return l}
+  function pUn(){if(isO('-')){p++;const x=pUn();return()=>-num(x())}return pPr()}
+  function pPr(){
+    const t=tk[p++];if(!t)throw Error('#ERR');
+    if(t.t==='s')return()=>t.v;
+    if(t.t==='n')return()=>t.v;
+    if(t.t==='r'){
+      const[r1,c1]=pos(t.a);
+      if(!t.b)return()=>val(r1,c1,stack);
+      const[r2,c2]=pos(t.b);
+      return()=>{const o=[];for(let r=Math.min(r1,r2);r<=Math.max(r1,r2);r++)for(let c=Math.min(c1,c2);c<=Math.max(c1,c2);c++)o.push(val(r,c,stack));return o};
+    }
+    if(t.t==='f'){
+      ex('(');const a=[];
+      if(!isO(')')){a.push(pCmp());while(isO(',')){p++;a.push(pCmp())}}
+      ex(')');
+      if(t.v==='IF')return()=>str(a[0]())==='TRUE'||(isN(str(a[0]()))&&+a[0]()!==0)?(a[1]?a[1]():'TRUE'):(a[2]?a[2]():'FALSE');
+      if(t.v==='IFERROR')return()=>{try{return a[0]()}catch(e){return a[1]?a[1]():''}};
+      if(!FN[t.v])throw Error('#NAME');
+      return()=>FN[t.v](...a.map(f=>f()));
+    }
+    if(t.t==='o'&&t.v==='('){const e=pCmp();ex(')');return e}
+    throw Error('#ERR');
+  }
+  const f=pCmp();
+  if(p<tk.length)throw Error('#ERR');
+  return f;
+}
+function disp(r,c){
+  try{return str(val(r,c))}catch(e){return e.message[0]==='#'?e.message:'#ERR'}
+}
+function mapRefs(f,fn){
+  return f.split(/("(?:[^"]|"")*")/).map((s,i)=>i%2?s:s.replace(/(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![\w(])/g,(m,d1,c,d2,r)=>{
+    const[nc,nr]=fn(ci(c),+r,!!d1,!!d2);return d1+cn(Math.max(0,nc))+d2+Math.max(1,nr)})).join('');
+}
+const shift=(f,dr,dc=0)=>mapRefs(f,(c,r,ac,ar)=>[ac?c:c+dc,ar?r:r+dr]);
+
+/* ---------- grid ---------- */
+let sel={ar:0,ac:0,fr:0,fc:0},edit=null,drag=null,fillTo=null,clip=null;
+const R=()=>({r1:Math.min(sel.ar,sel.fr),r2:Math.max(sel.ar,sel.fr),c1:Math.min(sel.ac,sel.fc),c2:Math.max(sel.ac,sel.fc)});
+const cell=(r,c)=>{const row=$('tbl').rows[r+1];return row&&row.cells[c+1]};
+function setCell(r,c){const t=cell(r,c);if(!t)return;const v=raw(r,c);t.textContent=v[0]==='='?disp(r,c):v}
+function refresh(){cache=new Map();S.cells.forEach((row,r)=>row.forEach((v,c)=>{if(v[0]==='='&&!(edit&&edit.r===r&&edit.c===c))setCell(r,c)}))}
+
+function paint(){
+  const g=R(),T=$('tbl'),multi=!(g.r1===g.r2&&g.c1===g.c2);
+  for(let r=0;r<S.cells.length;r++){
+    const row=T.rows[r+1];if(!row)continue;
+    for(let c=0;c<S.cols.length;c++){
+      const t=row.cells[c+1],inS=r>=g.r1&&r<=g.r2&&c>=g.c1&&c<=g.c2;
+      t.classList.toggle('sel',inS&&multi);
+      t.classList.toggle('act',r===sel.ar&&c===sel.ac);
+      t.classList.toggle('fl',!!fillTo&&!inS&&r>=fillTo.r1&&r<=fillTo.r2&&c>=fillTo.c1&&c<=fillTo.c2);
+    }
+    row.cells[0].classList.toggle('on',r>=g.r1&&r<=g.r2);
+  }
+  [...T.rows[0].cells].forEach((h,i)=>h.classList.toggle('on',i>0&&i-1>=g.c1&&i-1<=g.c2));
+  const a=cell(g.r2,g.c2),fh=$('fh');
+  if(a){const w=$('wrap').getBoundingClientRect(),b=a.getBoundingClientRect();fh.style.left=(b.right-w.left-5)+'px';fh.style.top=(b.bottom-w.top-5)+'px';fh.style.display='block'}
+}
+function select(ar,ac,fr=ar,fc=ac,scroll=true){
+  const mr=S.cells.length-1,mc=S.cols.length-1,cl=(v,m)=>Math.max(0,Math.min(m,v));
+  sel={ar:cl(ar,mr),ac:cl(ac,mc),fr:cl(fr,mr),fc:cl(fc,mc)};paint();
+  if(scroll){const t=cell(sel.fr,sel.fc);if(t)t.scrollIntoView({block:'nearest',inline:'nearest'})}
+}
+
+function render(){
+  cache=new Map();edit=null;
+  const t=$('tbl');t.innerHTML='';
+  const h=t.createTHead().insertRow();
+  h.appendChild(document.createElement('th'));
+  S.cols.forEach((c,i)=>{
+    const th=document.createElement('th');th.draggable=true;if(c.scratch)th.className='scr';
+    th.innerHTML=cn(i)+'<label><input type="checkbox" '+(c.scratch?'checked':'')+'> scratch</label>';
+    const cb=th.querySelector('input');
+    cb.onchange=()=>{checkpoint();c.scratch=cb.checked;persist();render()};
+    th.onclick=e=>{if(!e.target.closest('label'))select(0,i,S.cells.length-1,i)};
+    th.ondragstart=e=>{e.dataTransfer.setData('text/plain','col:'+i);e.dataTransfer.effectAllowed='move'};
+    th.ondragover=e=>{e.preventDefault();th.classList.add('dov')};
+    th.ondragleave=()=>th.classList.remove('dov');
+    th.ondrop=e=>{e.preventDefault();th.classList.remove('dov');const m=/^col:(\d+)$/.exec(e.dataTransfer.getData('text/plain'));if(m)swapCols(+m[1],i)};
+    h.appendChild(th);
+  });
+  S.cells.forEach((row,r)=>{
+    const tr=t.insertRow(),n=tr.insertCell();n.className='rn';n.textContent=r+1;
+    n.onclick=()=>select(r,0,r,S.cols.length-1);
+    S.cols.forEach((c,k)=>{
+      const d=tr.insertCell();d.dataset.r=r;d.dataset.c=k;if(c.scratch)d.className='scr';
+      const v=raw(r,k);d.textContent=v[0]==='='?disp(r,k):v;
+    });
+  });
+  $('sep').value=S.sep;$('link').checked=S.link;$('mname').value=S.name||'';
+  renderMods();select(sel.ar,sel.ac,sel.fr,sel.fc,false);
+}
+function swapCols(a,b){
+  if(a===b)return;commitEdit();checkpoint();
+  [S.cols[a],S.cols[b]]=[S.cols[b],S.cols[a]];
+  S.cells.forEach(row=>{
+    [row[a],row[b]]=[row[b],row[a]];
+    row.forEach((v,i)=>{if(v[0]==='=')row[i]=mapRefs(v,(c,r)=>[c===a?b:c===b?a:c,r])});
+  });
+  persist();render();select(0,b,S.cells.length-1,b);
+}
+
+/* editing */
+function startEdit(r,c,init,typed){
+  commitEdit();
+  const t=cell(r,c);if(!t)return;
+  const i=document.createElement('input');i.value=init!==undefined?init:raw(r,c);
+  t.textContent='';t.appendChild(i);edit={r,c,i,typed:!!typed};
+  i.focus();i.setSelectionRange(i.value.length,i.value.length);
+  i.onkeydown=ev=>{
+    const k=ev.key,a={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}[k];
+    if(k==='Enter'){ev.preventDefault();commitEdit();select(r+(ev.shiftKey?-1:1),c)}
+    else if(k==='Tab'){ev.preventDefault();commitEdit();select(r,c+(ev.shiftKey?-1:1))}
+    else if(k==='Escape'){ev.preventDefault();cancelEdit()}
+    else if(a&&edit&&edit.typed){ev.preventDefault();commitEdit();select(r+a[0],c+a[1])}
+  };
+  i.onblur=()=>{if(edit&&edit.i===i)commitEdit()};
+}
+function commitEdit(){
+  if(!edit)return;const{r,c,i}=edit;edit=null;i.onblur=null;
+  if(i.value!==raw(r,c))checkpoint();S.cells[r][c]=i.value;persist();setCell(r,c);refresh();
+}
+function cancelEdit(){if(!edit)return;const{r,c,i}=edit;edit=null;i.onblur=null;setCell(r,c)}
+function clearSel(){
+  checkpoint();const g=R();
+  for(let r=g.r1;r<=g.r2;r++)for(let c=g.c1;c<=g.c2;c++){S.cells[r][c]='';setCell(r,c)}
+  persist();refresh();
+}
+
+/* fill */
+function doFill(g,to){
+  checkpoint();ensure(to.r2,to.c2);
+  const h=g.r2-g.r1+1,w=g.c2-g.c1+1;
+  for(let r=g.r1;r<=to.r2;r++)for(let c=g.c1;c<=to.c2;c++){
+    if(r<=g.r2&&c<=g.c2)continue;
+    const sr=g.r1+((r-g.r1)%h),sc=g.c1+((c-g.c1)%w),v=raw(sr,sc);
+    S.cells[r][c]=v[0]==='='?shift(v,r-sr,c-sc):v;
+  }
+  persist();render();
+}
+function fillDownSel(){
+  const g=R();
+  if(g.r1===g.r2){if(g.r1>0)doFill({...g,r1:g.r1-1,r2:g.r1-1},{...g,r1:g.r1-1})}
+  else doFill({...g,r2:g.r1},g);
+}
+$('fh').addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();commitEdit();drag='fill'});
+$('fh').addEventListener('dblclick',()=>{
+  const g=R();let ac=g.c1-1;if(ac<0)ac=g.c2+1;if(ac>=S.cols.length)return;
+  let e=g.r2;while(e+1<S.cells.length&&raw(e+1,ac)!=='')e++;
+  if(e>g.r2){doFill(g,{...g,r2:e});select(g.r1,g.c1,e,g.c2)}
+});
+
+/* mouse */
+$('tbl').addEventListener('mousedown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  const t=e.target.closest('td[data-r]');if(!t)return;
+  commitEdit();if(document.activeElement)document.activeElement.blur();
+  const r=+t.dataset.r,c=+t.dataset.c;
+  e.shiftKey?select(sel.ar,sel.ac,r,c):select(r,c);
+  drag='sel';e.preventDefault();
+});
+$('tbl').addEventListener('dblclick',e=>{
+  const t=e.target.closest('td[data-r]');if(t&&e.target.tagName!=='INPUT')startEdit(+t.dataset.r,+t.dataset.c);
+});
+document.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  const t=document.elementFromPoint(e.clientX,e.clientY),d=t&&t.closest('td[data-r]');if(!d)return;
+  const r=+d.dataset.r,c=+d.dataset.c;
+  if(drag==='sel')select(sel.ar,sel.ac,r,c);
+  else{
+    const g=R(),dr=Math.max(0,r-g.r2),dc=Math.max(0,c-g.c2);
+    fillTo=!dr&&!dc?null:dr>=dc?{...g,r2:r}:{...g,c2:c};paint();
+  }
+});
+document.addEventListener('mouseup',()=>{
+  if(drag==='fill'&&fillTo){const g=R(),to=fillTo;fillTo=null;doFill(g,to);select(to.r1,to.c1,to.r2,to.c2)}
+  else if(drag==='fill'){fillTo=null;paint()}
+  drag=null;
+});
+
+/* keyboard */
+function jump(r,c,dr,dc){
+  const full=(a,b)=>raw(a,b)!=='',inb=(a,b)=>a>=0&&b>=0&&a<S.cells.length&&b<S.cols.length;
+  let nr=r+dr,nc=c+dc;if(!inb(nr,nc))return[r,c];
+  if(full(r,c)&&full(nr,nc)){while(inb(nr+dr,nc+dc)&&full(nr+dr,nc+dc)){nr+=dr;nc+=dc}}
+  else{while(inb(nr+dr,nc+dc)&&!full(nr,nc)){nr+=dr;nc+=dc}}
+  return[nr,nc];
+}
+document.addEventListener('keydown',e=>{
+  if(mode!=='edit'||edit||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
+  const k=e.key,ctrl=e.ctrlKey||e.metaKey;
+  if(ctrl&&k.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo();return}
+  if(ctrl&&k.toLowerCase()==='y'){e.preventDefault();redo();return}
+  const dirs={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]};
+  if(dirs[k]){
+    e.preventDefault();
+    const sh=e.shiftKey;let r=sh?sel.fr:sel.ar,c=sh?sel.fc:sel.ac;
+    if(ctrl)[r,c]=jump(r,c,...dirs[k]);else{r+=dirs[k][0];c+=dirs[k][1]}
+    sh?select(sel.ar,sel.ac,r,c):select(r,c);
+  }
+  else if(k==='Tab'){e.preventDefault();select(sel.ar,sel.ac+(e.shiftKey?-1:1))}
+  else if(k==='Enter'){e.preventDefault();select(sel.ar+(e.shiftKey?-1:1),sel.ac)}
+  else if(k==='Delete'||k==='Backspace'){e.preventDefault();clearSel()}
+  else if(k==='F2'){e.preventDefault();startEdit(sel.ar,sel.ac)}
+  else if(ctrl&&k.toLowerCase()==='a'){e.preventDefault();select(0,0,S.cells.length-1,S.cols.length-1)}
+  else if(ctrl&&k.toLowerCase()==='d'){e.preventDefault();fillDownSel()}
+  else if(!ctrl&&!e.altKey&&k.length===1){e.preventDefault();startEdit(sel.ar,sel.ac,k,true)}
+});
+
+/* clipboard */
+function parseTable(t){
+  t=t.replace(/\r\n?/g,'\n');
+  const d=t.includes('\t')?'\t':(t.includes(',')&&t.includes('\n')?',':null);
+  if(!d)return t.replace(/\n$/,'').split('\n').map(x=>[x]);
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<t.length;i++){
+    const ch=t[i];
+    if(q){if(ch==='"'){if(t[i+1]==='"'){f+='"';i++}else q=false}else f+=ch}
+    else if(ch==='"'&&f==='')q=true;
+    else if(ch===d){row.push(f);f=''}
+    else if(ch==='\n'){row.push(f);rows.push(row);row=[];f=''}
+    else f+=ch;
+  }
+  if(f!==''||row.length){row.push(f);rows.push(row)}
+  return rows;
+}
+const skipClip=e=>mode!=='edit'||edit||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+function doCopy(e,cut){
+  if(skipClip(e))return;
+  const g=R(),vals=[],raws=[];
+  for(let r=g.r1;r<=g.r2;r++){const a=[],b=[];for(let c=g.c1;c<=g.c2;c++){a.push(disp(r,c));b.push(raw(r,c))}vals.push(a);raws.push(b)}
+  const q=s=>/[\t\n"]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  const text=vals.map(r=>r.map(q).join('\t')).join('\n');
+  e.clipboardData.setData('text/plain',text);e.preventDefault();
+  clip={text,raw:raws,r:g.r1,c:g.c1};
+  if(cut)clearSel();
+}
+document.addEventListener('copy',e=>doCopy(e,false));
+document.addEventListener('cut',e=>doCopy(e,true));
+document.addEventListener('paste',e=>{
+  if(skipClip(e))return;
+  e.preventDefault();
+  const text=e.clipboardData.getData('text/plain');if(text==='')return;
+  const g=R(),internal=clip&&text===clip.text,m=internal?clip.raw:parseTable(text);
+  const h=m.length,w=Math.max(...m.map(x=>x.length));
+  const rows=h===1&&w===1?g.r2-g.r1+1:h,cols=h===1&&w===1?g.c2-g.c1+1:w;
+  checkpoint();
+  for(let i=0;i<rows;i++)for(let j=0;j<cols;j++){
+    ensure(g.r1+i,g.c1+j);
+    let v=m[i%h][j%w]??'';
+    if(internal&&v[0]==='=')v=shift(v,g.r1+i-(clip.r+i%h),g.c1+j-(clip.c+j%w));
+    S.cells[g.r1+i][g.c1+j]=v;
+  }
+  persist();render();select(g.r1,g.c1,g.r1+rows-1,g.c1+cols-1);
+});
+
+/* ---------- undo / redo ---------- */
+const snapS=()=>JSON.stringify({cols:S.cols,cells:S.cells,sep:S.sep,link:S.link});
+let undoSt=[],redoSt=[];
+function updUR(){$('undo').disabled=!undoSt.length;$('redo').disabled=!redoSt.length}
+function checkpoint(){undoSt.push(snapS());if(undoSt.length>200)undoSt.shift();redoSt=[];updUR()}
+function restore(j){const o=JSON.parse(j);S.cols=o.cols;S.cells=o.cells;S.sep=o.sep;S.link=o.link;persist();render()}
+function undo(){commitEdit();if(!undoSt.length)return;redoSt.push(snapS());restore(undoSt.pop());updUR()}
+function redo(){commitEdit();if(!redoSt.length)return;undoSt.push(snapS());restore(redoSt.pop());updUR()}
+$('undo').onclick=undo;$('redo').onclick=redo;updUR();
+
+/* ---------- toolbar ---------- */
+$('addRow').onclick=()=>{checkpoint();ensure(S.cells.length,0);persist();render()};
+$('add5').onclick=()=>{checkpoint();ensure(S.cells.length+4,0);persist();render()};
+$('delRow').onclick=()=>{checkpoint();if(S.cells.length>1){S.cells.pop();persist();render()}};
+$('addCol').onclick=()=>{checkpoint();ensure(0,S.cols.length);persist();render()};
+$('delCol').onclick=()=>{checkpoint();if(S.cols.length>1){S.cols.pop();S.cells.forEach(r=>r.pop());persist();render()}};
+$('fill').onclick=()=>{const g=R();doFill(g,{...g,r2:S.cells.length-1})};
+$('sep').oninput=e=>{S.sep=e.target.value;persist()};
+$('link').onchange=e=>{S.link=e.target.checked;persist()};
+$('clear').onclick=()=>{if(confirm('Clear the whole grid?')){checkpoint();S=fresh();persist();cache=new Map();render()}};
+
+/* ---------- modules ---------- */
+const snap=name=>({name,cols:S.cols,cells:S.cells,sep:S.sep,link:S.link});
+function renderMods(){
+  const m=mods(),box=$('mods');box.innerHTML='';
+  Object.keys(m).forEach(k=>{
+    const d=document.createElement('div');d.className='mod';
+    d.innerHTML='<span></span><button>Load</button><button>Delete</button>';
+    d.firstChild.textContent=k;
+    const[b1,b2]=d.querySelectorAll('button');
+    b1.onclick=()=>{checkpoint();S=JSON.parse(JSON.stringify(m[k]));S.name=k;persist();cache=new Map();render()};
+    b2.onclick=()=>{if(confirm('Delete "'+k+'"?')){const x=mods();delete x[k];store(MK,x);renderMods()}};
+    box.appendChild(d);
+  });
+}
+$('save').onclick=()=>{
+  const n=$('mname').value.trim();if(!n){$('mname').focus();return}
+  S.name=n;const m=mods();m[n]=JSON.parse(JSON.stringify(snap(n)));store(MK,m);persist();renderMods();
+};
+function dl(obj,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));
+  a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+$('dlCur').onclick=()=>dl(snap($('mname').value.trim()||'module'),($('mname').value.trim()||'module')+'.json');
+$('dlAll').onclick=()=>dl({modules:mods()},'modules.json');
+$('imp').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  f.text().then(t=>{
+    const j=JSON.parse(t),m=mods();
+    if(j.modules)Object.assign(m,j.modules);
+    else if(j.cols&&j.cells)m[j.name||f.name.replace(/\.json$/,'')]=j;
+    store(MK,m);renderMods();e.target.value='';
+  }).catch(()=>alert('Invalid JSON file'));
+};
+
+/* ---------- practice ---------- */
+let mode='edit';
+function setMode(m){
+  mode=m;$('edit').classList.toggle('hide',m!=='edit');$('prac').classList.toggle('hide',m!=='prac');
+  $('tEdit').classList.toggle('on',m==='edit');$('tPrac').classList.toggle('on',m==='prac');
+  if(document.activeElement)document.activeElement.blur();
+  if(m==='prac')roll();
+}
+$('tEdit').onclick=()=>setMode('edit');$('tPrac').onclick=()=>setMode('prac');
+function roll(){
+  cache=new Map();
+  const cols=S.cols.map((c,i)=>i).filter(i=>!S.cols[i].scratch);
+  const vals=cols.map(c=>S.cells.map((_,r)=>disp(r,c)));
+  let parts=[];
+  if(S.link){
+    const rows=S.cells.map((_,r)=>r).filter(r=>vals.some(v=>v[r]!==''));
+    if(rows.length){const r=rows[Math.random()*rows.length|0];parts=vals.map(v=>v[r])}
+  }else parts=vals.map(v=>{const f=v.filter(x=>x!=='');return f.length?f[Math.random()*f.length|0]:''});
+  parts=parts.filter(x=>x!=='');
+  $('out').textContent=parts.length?parts.join(S.sep):'Nothing to show yet — add data in Edit.';
+}
+$('stage').onclick=roll;
+document.addEventListener('keydown',e=>{if(mode==='prac'&&e.code==='Space'){e.preventDefault();roll()}});
+
+render();
+</script>
+</body>
+</html>
